@@ -74,10 +74,13 @@ async def delete_customer(customer_id: int):
     return {"detail": "Customer deleted successfully"}
 
 @app.get("/customers/", response_model=List[Customer])
-async def list_customers(limit: int = Query(10), offset: int = Query(0)):
+async def list_customers(limit: int = Query(10), offset: int = Query(0), name: Optional[str] = None):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM customers LIMIT ? OFFSET ?', (limit, offset))
+        if name:
+            cursor.execute('SELECT * FROM customers WHERE name LIKE ? LIMIT ? OFFSET ?', (f"%{name}%", limit, offset))
+        else:
+            cursor.execute('SELECT * FROM customers LIMIT ? OFFSET ?', (limit, offset))
         rows = cursor.fetchall()
     return [{"id": row[0], "name": row[1], "email": row[2]} for row in rows]
 
@@ -122,10 +125,17 @@ async def delete_item(item_id: int):
     return {"detail": "Item deleted successfully"}
 
 @app.get("/items/", response_model=List[Item])
-async def list_items(limit: int = Query(10), offset: int = Query(0)):
+async def list_items(limit: int = Query(10), offset: int = Query(0), min_price: Optional[float] = None, max_price: Optional[float] = None):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM items LIMIT ? OFFSET ?', (limit, offset))
+        if min_price is not None and max_price is not None:
+            cursor.execute('SELECT * FROM items WHERE price BETWEEN ? AND ? LIMIT ? OFFSET ?', (min_price, max_price, limit, offset))
+        elif min_price is not None:
+            cursor.execute('SELECT * FROM items WHERE price >= ? LIMIT ? OFFSET ?', (min_price, limit, offset))
+        elif max_price is not None:
+            cursor.execute('SELECT * FROM items WHERE price <= ? LIMIT ? OFFSET ?', (max_price, limit, offset))
+        else:
+            cursor.execute('SELECT * FROM items LIMIT ? OFFSET ?', (limit, offset))
         rows = cursor.fetchall()
     return [{"id": row[0], "name": row[1], "description": row[2], "price": row[3]} for row in rows]
 
@@ -177,10 +187,17 @@ async def delete_order(order_id: int):
     return {"detail": "Order deleted successfully"}
 
 @app.get("/orders/", response_model=List[Order])
-async def list_orders(limit: int = Query(10), offset: int = Query(0)):
+async def list_orders(limit: int = Query(10), offset: int = Query(0), customer_id: Optional[int] = None, order_date: Optional[str] = None):
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM orders LIMIT ? OFFSET ?', (limit, offset))
+        if customer_id and order_date:
+            cursor.execute('SELECT * FROM orders WHERE customer_id = ? AND order_date = ? LIMIT ? OFFSET ?', (customer_id, order_date, limit, offset))
+        elif customer_id:
+            cursor.execute('SELECT * FROM orders WHERE customer_id = ? LIMIT ? OFFSET ?', (customer_id, limit, offset))
+        elif order_date:
+            cursor.execute('SELECT * FROM orders WHERE order_date = ? LIMIT ? OFFSET ?', (order_date, limit, offset))
+        else:
+            cursor.execute('SELECT * FROM orders LIMIT ? OFFSET ?', (limit, offset))
         rows = cursor.fetchall()
     return [{"id": row[0], "customer_id": row[1], "item_id": row[2], "quantity": row[3], "order_date": row[4]} for row in rows]
 
@@ -191,15 +208,15 @@ async def upload_orders(file: UploadFile = File(...)):
         orders_data = json.load(file.file)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON file")
+
     with get_connection() as conn:
         cursor = conn.cursor()
-        try:
-            for order in orders_data:
-                cursor.execute(
-                    'INSERT INTO orders (customer_id, item_id, quantity, order_date) VALUES (?, ?, ?, ?)',
-                    (order['customer_id'], order['item_id'], order['quantity'], order['order_date'])
-                )
-            conn.commit()
-        except KeyError:
-            raise HTTPException(status_code=400, detail="Order data missing required fields")
+        for order in orders_data:
+            customer_id = order['customer_id']
+            item_id = order['item_id']
+            quantity = order['quantity']
+            order_date = order['order_date']
+            cursor.execute('INSERT INTO orders (customer_id, item_id, quantity, order_date) VALUES (?, ?, ?, ?)', (customer_id, item_id, quantity, order_date))
+        conn.commit()
+
     return {"message": "Orders successfully uploaded"}
